@@ -1,9 +1,9 @@
 // client/src/app/admin/events/[id]/page.tsx
-// Detalhe do evento — info + participantes + presenças + avaliações
+// Detalhe do evento — info + participantes + presenças + avaliações + importação CSV
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
@@ -40,6 +40,41 @@ interface EventDetail {
   enrollments: EnrollmentItem[];
 }
 
+function parseCSV(text: string): Array<Record<string, string>> {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+
+  // Detectar separador (vírgula ou ponto-e-vírgula)
+  const separator = lines[0].includes(';') ? ';' : ',';
+
+  const headers = lines[0].split(separator).map(h => h.trim().toLowerCase().replace(/"/g, ''));
+  const rows: Array<Record<string, string>> = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(separator).map(v => v.trim().replace(/"/g, ''));
+    if (values.length < 2) continue;
+
+    const row: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] || '';
+    });
+
+    // Mapear variações comuns de nomes de colunas
+    const mapped: Record<string, string> = {
+      name: row['name'] || row['nome'] || row['nome completo'] || '',
+      email: row['email'] || row['e-mail'] || row['mail'] || '',
+      phone: row['phone'] || row['telefone'] || row['telemovel'] || row['telemóvel'] || '',
+      organization: row['organization'] || row['organização'] || row['organizacao'] || row['empresa'] || '',
+    };
+
+    if (mapped.name && mapped.email) {
+      rows.push(mapped);
+    }
+  }
+
+  return rows;
+}
+
 export default function EventDetailPage() {
   const { token } = useAuth();
   const params = useParams();
@@ -52,6 +87,11 @@ export default function EventDetailPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newParticipant, setNewParticipant] = useState({ name: '', email: '', phone: '', organization: '' });
   const [addError, setAddError] = useState('');
+
+  // Importação CSV
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ added: number; skipped: number; errors?: string[] } | null>(null);
 
   useEffect(() => {
     if (token && params.id) loadEvent();
@@ -116,6 +156,40 @@ export default function EventDetailPage() {
       loadEvent();
     } catch (err: any) {
       setAddError(err.message);
+    }
+  }
+
+  async function handleCSVImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const text = await file.text();
+      const participants = parseCSV(text);
+
+      if (participants.length === 0) {
+        setImportResult({ added: 0, skipped: 0, errors: ['Ficheiro vazio ou formato inválido. Use colunas: name/nome, email, phone/telefone, organization/organização'] });
+        setImporting(false);
+        return;
+      }
+
+      const data = await apiFetch(`/events/${params.id}/participants/import`, {
+        method: 'POST',
+        token: token!,
+        body: JSON.stringify({ participants }),
+      });
+
+      setImportResult(data);
+      loadEvent();
+    } catch (err: any) {
+      setImportResult({ added: 0, skipped: 0, errors: [err.message] });
+    } finally {
+      setImporting(false);
+      // Reset do input para permitir reimportação do mesmo ficheiro
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -211,13 +285,73 @@ export default function EventDetailPage() {
           <h2 className="text-lg font-semibold text-gray-900">
             Participantes ({event.enrollments.length})
           </h2>
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="bg-blue-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors"
-          >
-            + Adicionar
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Botão Importar CSV */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.txt"
+              onChange={handleCSVImport}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
+            >
+              {importing ? 'A importar...' : '📄 Importar CSV'}
+            </button>
+            {/* Botão Adicionar */}
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="bg-blue-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors"
+            >
+              + Adicionar
+            </button>
+          </div>
         </div>
+
+        {/* Import Result Message */}
+        {importResult && (
+          <div className={`mx-6 mt-4 px-4 py-3 rounded-lg text-sm ${
+            importResult.errors && importResult.errors.length > 0 && importResult.added === 0
+              ? 'bg-red-50 border border-red-200 text-red-700'
+              : 'bg-green-50 border border-green-200 text-green-700'
+          }`}>
+            <p className="font-medium">
+              {importResult.added > 0
+                ? `${importResult.added} participante(s) adicionado(s)`
+                : 'Nenhum participante adicionado'}
+              {importResult.skipped > 0 && `, ${importResult.skipped} ignorado(s) (duplicados ou inválidos)`}
+            </p>
+            {importResult.errors && importResult.errors.length > 0 && (
+              <ul className="mt-1 text-xs space-y-0.5">
+                {importResult.errors.map((err, i) => (
+                  <li key={i}>• {err}</li>
+                ))}
+              </ul>
+            )}
+            <button
+              onClick={() => setImportResult(null)}
+              className="text-xs underline mt-1 opacity-70 hover:opacity-100"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+
+        {/* CSV Format Help */}
+        {importResult?.errors && importResult.added === 0 && (
+          <div className="mx-6 mt-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+            <p className="font-medium mb-1">Formato esperado do CSV:</p>
+            <code className="text-xs bg-white px-2 py-1 rounded block">
+              name;email;phone;organization<br />
+              Ana Silva;ana@email.com;912345678;Empresa X<br />
+              Carlos Mendes;carlos@email.com;;Empresa Y
+            </code>
+            <p className="text-xs mt-1 opacity-70">Aceita separador vírgula (,) ou ponto-e-vírgula (;). Colunas aceites: name/nome, email, phone/telefone, organization/organização/empresa.</p>
+          </div>
+        )}
 
         {/* Add Participant Form */}
         {showAddForm && (
