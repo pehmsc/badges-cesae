@@ -12,7 +12,9 @@
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.2",
     "pg": "^8.20.0",
-    "sequelize": "^6.37.8"
+    "puppeteer": "^24.39.1",
+    "sequelize": "^6.37.8",
+    "uuid": "^13.0.0"
   },
   "name": "badges-cesae-server",
   "scripts": {
