@@ -1,163 +1,159 @@
-// server/src/services/certificateGenerator.js
-// Gera certificados PDF para eventos usando Puppeteer + HTML template
-
 const puppeteer = require("puppeteer");
-const path = require("path");
 const fs = require("fs");
-const { v4: uuidv4 } = require("uuid"); // npm i uuid if needed
+const path = require("path");
+const {
+  sequelize,
+  Enrollment,
+  Event,
+  Participant,
+  Badge,
+  Certificate,
+} = require("../../models");
 
+// Diretório de certificados
 const CERTIFICATES_DIR = path.join(__dirname, "../../../uploads/certificates");
 if (!fs.existsSync(CERTIFICATES_DIR)) {
   fs.mkdirSync(CERTIFICATES_DIR, { recursive: true });
 }
 
-/**
- * Gera HTML template para certificado PDF
- */
-function generateCertificateHTML({
-  participantName,
-  eventTitle,
-  eventType,
-  date,
-  durationHours,
-  validationCode,
-}) {
-  const badgeType =
-    eventType === "curso" ? "Conclusão do Curso" : "Participação no Evento";
-  return `
+async function generateCertificate(enrollmentId) {
+  let browser;
+  try {
+    // 1. Fetch dados individuais (fix include bug)
+    const enrollment = await Enrollment.findByPk(enrollmentId);
+    if (!enrollment) {
+      return { success: false, error: "Enrollment não encontrado" };
+    }
+
+    const event = await Event.findByPk(enrollment.event_id);
+    const participant = await Participant.findByPk(enrollment.participant_id);
+    const badge = await Badge.findOne({
+      where: { enrollment_id: enrollmentId },
+    });
+
+    if (!event || !participant) {
+      return { success: false, error: "Event ou Participant não encontrado" };
+    }
+
+    // 2. Badge base64
+    let badgeBase64 = "";
+    if (badge && badge.image_url) {
+      const badgePath = path.join(
+        __dirname,
+        "../../../uploads/badges",
+        path.basename(badge.image_url),
+      );
+      if (fs.existsSync(badgePath)) {
+        const badgeBuffer = fs.readFileSync(badgePath);
+        badgeBase64 = `data:image/png;base64,${badgeBuffer.toString("base64")}`;
+      }
+    }
+
+    // 3. Certificate
+    let certificate = await Certificate.findOne({
+      where: { enrollment_id: enrollmentId },
+    });
+    if (!certificate) {
+      certificate = await Certificate.create({
+        enrollment_id: enrollmentId,
+        validation_code: `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+        email_sent: false,
+      });
+    }
+    const validationCode = certificate.validation_code;
+
+    // 4. HTML Template
+    const html = `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Certificado - CESAE Digital</title>
+  <meta charset="utf-8">
   <style>
-    @page { margin: 2cm; }
-    body { font-family: Arial, sans-serif; max-width: 21cm; margin: 0 auto; }
-    .header { text-align: center; margin-bottom: 30px; }
-    .logo { font-size: 28px; font-weight: bold; color: #1B4F72; }
-    .badge-type { background: linear-gradient(90deg, #1B4F72, #8E44AD); color: white; padding: 10px 20px; display: inline-block; margin: 20px 0; border-radius: 5px; }
-    .participant { font-size: 32px; font-weight: bold; text-align: center; margin: 40px 0; color: #1C2833; }
-    .event-title { font-size: 24px; text-align: center; margin: 30px 0; color: #1B4F72; }
-    .details { text-align: center; color: #566573; margin: 20px 0; }
-    .validation { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 40px 0; text-align: center; }
-    .code { font-size: 24px; font-weight: bold; color: #1B4F72; letter-spacing: 3px; }
-    .footer { margin-top: 60px; text-align: center; color: #566573; font-size: 12px; border-top: 1px solid #dee2e6; padding-top: 20px; }
+    @page { size: A4 landscape; margin: 1.5cm; }
+    body { font-family: Arial, sans-serif; color: #1c2833; padding: 30px; }
+    .header { text-align: center; margin-bottom: 40px; }
+    .logo { font-size: 42px; font-weight: bold; color: #1B4F72; }
+    .title { font-size: 34px; color: #0066CC; margin: 15px 0; }
+    .content { display: flex; gap: 40px; margin: 50px 0; }
+    .info { flex: 1; }
+    .name { font-size: 38px; font-weight: bold; color: #1B4F72; margin: 20px 0; text-align: center; }
+    .event-title { font-size: 28px; color: #2E86C1; margin-bottom: 25px; text-align: center; }
+    .details { background: #F8F9FA; padding: 25px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+    .details table { width: 100%; border-collapse: collapse; }
+    .details td { padding: 12px; border-bottom: 1px solid #dee2e6; }
+    .badge-section { flex: 0 0 300px; text-align: center; }
+    .badge-img { width: 280px; height: 280px; object-fit: cover; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+    .validation { background: linear-gradient(135deg, #1B4F72, #2E86C1); color: white; padding: 40px; border-radius: 25px; margin: 60px 0; text-align: center; }
+    .code { font-size: 48px; font-weight: bold; font-family: monospace; letter-spacing: 6px; margin: 20px 0; }
+    .footer { text-align: center; margin-top: 60px; color: #7F8C8D; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="logo">CESAE DIGITAL</div>
-    <div class="badge-type">${badgeType}</div>
+    <div class="title">CERTIFICADO DE CONCLUSÃO</div>
   </div>
   
-  <div class="participant">CERTIFICADO DE ${badgeType.toUpperCase()}</div>
-  
-  <p style="text-align: center; font-size: 18px; margin-bottom: 20px;">
-    É certificado que <strong>${participantName}</strong>
-  </p>
-  
-  <div class="event-title"><strong>${eventTitle}</strong></div>
-  
-  <div class="details">
-    📅 ${date} | ⏱ ${durationHours || "N/A"} horas
-  </div>
-  
-  <div class="validation">
-    <div style="font-size: 16px; margin-bottom: 10px;">Código de Validação</div>
-    <div class="code">${validationCode}</div>
-    <div style="font-size: 12px; color: #6b7280; margin-top: 10px;">
-      badges.cesae.pt/validate/${validationCode}
+  <div class="content">
+    <div class="info">
+      <div class="name">${participant.name}</div>
+      <div class="event-title">${event.title}</div>
+      <div class="details">
+        <table>
+          <tr><td><strong>Data:</strong></td><td>${new Date(event.start_date).toLocaleDateString("pt-PT")}</td></tr>
+          <tr><td><strong>Duração:</strong></td><td>${event.duration_hours} horas</td></tr>
+          <tr><td><strong>Email:</strong></td><td>${participant.email}</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="badge-section">
+      ${badgeBase64 ? `<img src="${badgeBase64}" alt="Badge CESAE" class="badge-img">` : '<div style="width:280px;height:280px;background:#E3F2FD;border-radius:20px;border:4px dashed #B0BEC5;display:flex;align-items:center;justify-content:center;color:#666;font-size:18px;font-weight:bold">Badge Digital CESAE</div>'}
     </div>
   </div>
-  
+
+  <div class="validation">
+    <h3>CÓDIGO DE VALIDAÇÃO</h3>
+    <div class="code">${validationCode}</div>
+    <p>Verify at <strong>badges.cesae.pt/validate/${validationCode}</strong></p>
+  </div>
+
   <div class="footer">
-    Emitido em ${new Date().toLocaleDateString("pt-PT")} | CESAE Digital © 2026<br>
-    Verificar autenticidade em badges.cesae.pt/validate
+    CESAE Digital © 2026 | Certificado gerado automaticamente
   </div>
 </body>
 </html>`;
-}
 
-/**
- * Gera PDF para uma enrollment
- */
-async function generateCertificatePDF(enrollmentData) {
-  const browser = await puppeteer.launch({ headless: true });
-  try {
+    // 5. Puppeteer
+    browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
-    const validationCode = uuidv4().slice(0, 8).toUpperCase(); // Short unique code
-    const html = generateCertificateHTML({
-      participantName: enrollmentData.participantName,
-      eventTitle: enrollmentData.eventTitle,
-      eventType: enrollmentData.eventType,
-      date: enrollmentData.date,
-      durationHours: enrollmentData.durationHours,
-      validationCode,
-    });
-
     await page.setContent(html, { waitUntil: "networkidle0" });
 
     const filename = `cert_${validationCode}.pdf`;
     const filepath = path.join(CERTIFICATES_DIR, filename);
-    await page.pdf({
-      path: filepath,
+    const buffer = await page.pdf({
       format: "A4",
+      landscape: true,
       printBackground: true,
-      margin: { top: "20px", bottom: "20px" },
+      preferCSSPageSize: true,
     });
+    fs.writeFileSync(filepath, buffer);
+
+    // 6. Update DB
+    await certificate.update({ pdf_url: `/uploads/certificates/${filename}` });
 
     await browser.close();
-
     return {
+      success: true,
       filename,
       filepath,
-      pdf_url: `/uploads/certificates/${filename}`,
-      validation_code: validationCode,
+      url: `/uploads/certificates/${filename}`,
+      validationCode,
     };
   } catch (error) {
-    await browser.close();
-    throw error;
+    if (browser) await browser.close();
+    console.error("Erro PDF:", error);
+    return { success: false, error: error.message };
   }
 }
 
-/**
- * Gera certificates para todos eligible enrollments de um event
- */
-async function generateCertificatesForEvent(event) {
-  const eligibleEnrollments = event.enrollments.filter((e) => {
-    if (event.type === "evento") return e.status === "presente";
-    if (event.type === "curso") return e.evaluation_result === "aprovado";
-    return false;
-  });
-
-  const results = [];
-  for (const enrollment of eligibleEnrollments) {
-    try {
-      const cert = await generateCertificatePDF({
-        participantName: enrollment.participant.name,
-        eventTitle: event.title,
-        eventType: event.type,
-        date: new Date(event.start_date).toLocaleDateString("pt-PT"),
-        durationHours: event.duration_hours,
-      });
-
-      results.push({
-        enrollmentId: enrollment.id,
-        certificate: cert,
-        success: true,
-      });
-    } catch (error) {
-      results.push({
-        enrollmentId: enrollment.id,
-        error: error.message,
-        success: false,
-      });
-    }
-  }
-  return results;
-}
-
-module.exports = {
-  generateCertificatePDF,
-  generateCertificatesForEvent,
-};
+module.exports = { generateCertificate };
