@@ -3,9 +3,22 @@
 
 const express = require("express");
 const router = express.Router();
-const { validateCertificate } = require("../controllers/certificateController");
+const {
+  validateCertificate,
+  createCertificate,
+} = require("../controllers/certificateController");
+const { authMiddleware } = require("../middleware/auth");
+const { roleGuard } = require("../middleware/roleGuard");
 
 // GET /api/certificates/validate/:code — endpoint público, sem autenticação
 router.get("/validate/:code", validateCertificate);
+
+// POST /api/certificates — emitir certificado (admin only)
+router.post(
+  "/certificates",
+  authMiddleware,
+  roleGuard("admin"),
+  createCertificate,
+);
 
 module.exports = router;
