@@ -30,10 +30,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   if (!user) return null;
 
   const navItems = [
-    { href: '/admin/dashboard', label: 'Dashboard', icon: '📊' },
-    { href: '/admin/events', label: 'Eventos', icon: '📅' },
-    { href: '/admin/templates', label: 'Templates', icon: '🎨' },
-    { href: '/admin/users', label: 'Utilizadores', icon: '👥' },
+    { href: '/admin/dashboard', label: 'Dashboard', icon: '' },
+    { href: '/admin/events', label: 'Eventos', icon: '' },
+    { href: '/admin/templates', label: 'Templates', icon: '' },
+    { href: '/admin/users', label: 'Utilizadores', icon: '' },
   ];
 
   const handleLogout = () => {
