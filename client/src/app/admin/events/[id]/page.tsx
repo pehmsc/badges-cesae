@@ -368,7 +368,7 @@ export default function EventDetailPage() {
                     A emitir...
                   </>
                 ) : (
-                  <>🎖️ Emitir badges</>
+                  <> Emitir badges</>
                 )}
               </button>
               <button
@@ -385,7 +385,7 @@ export default function EventDetailPage() {
                     A enviar...
                   </>
                 ) : (
-                  <>✉️ Enviar emails</>
+                  <> Enviar emails</>
                 )}
               </button>
             </div>
@@ -454,7 +454,7 @@ export default function EventDetailPage() {
               disabled={importing}
               className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
             >
-              {importing ? 'A importar...' : '📄 Importar CSV'}
+              {importing ? 'A importar...' : ' Importar CSV'}
             </button>
             {/* Botão Adicionar */}
             <button
