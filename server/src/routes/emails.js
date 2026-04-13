@@ -5,7 +5,7 @@ const express = require("express");
 const router = express.Router();
 const { authMiddleware } = require("../middleware/auth");
 const { roleGuard } = require("../middleware/roleGuard");
-const { sendBulkEmails } = require("../controllers/emailController");
+const { sendBulkEmails, resendEmail } = require("../controllers/emailController");
 
 // POST /api/events/:id/send-emails — Enviar emails em massa (só admin)
 router.post(
@@ -13,6 +13,14 @@ router.post(
   authMiddleware,
   roleGuard("admin"),
   sendBulkEmails,
+);
+
+// POST /api/enrollments/:enrollmentId/resend-email — Reenviar email individual (admin)
+router.post(
+  "/enrollments/:enrollmentId/resend-email",
+  authMiddleware,
+  roleGuard("admin"),
+  resendEmail,
 );
 
 module.exports = router;

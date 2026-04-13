@@ -1,12 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
-const {
-  Certificate,
-  Enrollment,
-  Participant,
-  Event,
-  Badge,
-} = require("../models");
 
 const EmailLog = sequelize.define(
   "EmailLog",

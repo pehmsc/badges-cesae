@@ -6,9 +6,10 @@
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 const fs = require("fs");
+const { uploadToR2, isR2Configured } = require("./r2");
 
 // Garantir que a pasta de output existe
-const BADGES_DIR = path.join(__dirname, "../../..", "uploads", "badges");
+const BADGES_DIR = path.join(__dirname, "../..", "uploads", "badges");
 if (!fs.existsSync(BADGES_DIR)) {
   fs.mkdirSync(BADGES_DIR, { recursive: true });
 }
@@ -291,14 +292,15 @@ async function generateBadge(options) {
 
       if (pngBuffer) {
         const filename = `badge_${validationCode || Date.now()}.png`;
-        const filepath = path.join(BADGES_DIR, filename);
-        fs.writeFileSync(filepath, pngBuffer);
-
-        return {
-          filename,
-          filepath,
-          url: `${process.env.SERVER_URL || ""}/uploads/badges/${filename}`,
-        };
+        let url;
+        if (isR2Configured()) {
+          url = await uploadToR2(pngBuffer, `badges/${filename}`, "image/png");
+        } else {
+          const filepath = path.join(BADGES_DIR, filename);
+          fs.writeFileSync(filepath, pngBuffer);
+          url = `${process.env.SERVER_URL || ""}/uploads/badges/${filename}`;
+        }
+        return { filename, url };
       }
     } catch (error) {
       console.warn("Erro ao gerar badge SVG:", error.message);
@@ -553,16 +555,18 @@ async function generateBadge(options) {
 
   // ── GUARDAR FICHEIRO ──
   const filename = `badge_${validationCode || Date.now()}.png`;
-  const filepath = path.join(BADGES_DIR, filename);
-
   const buffer = canvas.toBuffer("image/png");
-  fs.writeFileSync(filepath, buffer);
 
-  return {
-    filename,
-    filepath,
-    url: `${process.env.SERVER_URL || ""}/uploads/badges/${filename}`,
-  };
+  let url;
+  if (isR2Configured()) {
+    url = await uploadToR2(buffer, `badges/${filename}`, "image/png");
+  } else {
+    const filepath = path.join(BADGES_DIR, filename);
+    fs.writeFileSync(filepath, buffer);
+    url = `${process.env.SERVER_URL || ""}/uploads/badges/${filename}`;
+  }
+
+  return { filename, url };
 }
 
 /**

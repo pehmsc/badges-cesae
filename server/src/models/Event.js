@@ -39,6 +39,14 @@ const Event = sequelize.define('Event', {
     type: DataTypes.STRING(100),
     allowNull: true
   },
+  template_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'badge_templates',
+      key: 'id'
+    }
+  },
   created_by: {
     type: DataTypes.INTEGER,
     allowNull: true,
