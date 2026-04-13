@@ -1,17 +1,16 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
-const {
-  sequelize,
-  Enrollment,
-  Event,
-  Participant,
-  Badge,
-  Certificate,
-} = require("../../models");
+const { uploadToR2, isR2Configured } = require("./r2");
+const sequelize = require("../config/database");
+const Enrollment = require("../models/Enrollment");
+const Event = require("../models/Event");
+const Participant = require("../models/Participant");
+const Badge = require("../models/Badge");
+const Certificate = require("../models/Certificate");
 
 // Diretório de certificados
-const CERTIFICATES_DIR = path.join(__dirname, "../../../uploads/certificates");
+const CERTIFICATES_DIR = path.join(__dirname, "../../uploads/certificates");
 if (!fs.existsSync(CERTIFICATES_DIR)) {
   fs.mkdirSync(CERTIFICATES_DIR, { recursive: true });
 }
@@ -40,7 +39,7 @@ async function generateCertificate(enrollmentId) {
     if (badge && badge.image_url) {
       const badgePath = path.join(
         __dirname,
-        "../../../uploads/badges",
+        "../../uploads/badges",
         path.basename(badge.image_url),
       );
       if (fs.existsSync(badgePath)) {
@@ -69,23 +68,23 @@ async function generateCertificate(enrollmentId) {
 <head>
   <meta charset="utf-8">
   <style>
-    @page { size: A4 landscape; margin: 1.5cm; }
-    body { font-family: Arial, sans-serif; color: #1c2833; padding: 30px; }
-    .header { text-align: center; margin-bottom: 40px; }
+    @page { size: A4 landscape; margin: 1cm; }
+    body { font-family: Arial, sans-serif; color: #1c2833; padding: 16px 24px; }
+    .header { text-align: center; margin-bottom: 16px; }
     .logo { font-size: 42px; font-weight: bold; color: #1B4F72; }
-    .title { font-size: 34px; color: #0066CC; margin: 15px 0; }
-    .content { display: flex; gap: 40px; margin: 50px 0; }
+    .title { font-size: 34px; color: #0066CC; margin: 8px 0; }
+    .content { display: flex; gap: 40px; margin: 18px 0; }
     .info { flex: 1; }
-    .name { font-size: 38px; font-weight: bold; color: #1B4F72; margin: 20px 0; text-align: center; }
-    .event-title { font-size: 28px; color: #2E86C1; margin-bottom: 25px; text-align: center; }
-    .details { background: #F8F9FA; padding: 25px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+    .name { font-size: 38px; font-weight: bold; color: #1B4F72; margin: 12px 0; text-align: center; }
+    .event-title { font-size: 28px; color: #2E86C1; margin-bottom: 16px; text-align: center; }
+    .details { background: #F8F9FA; padding: 18px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
     .details table { width: 100%; border-collapse: collapse; }
-    .details td { padding: 12px; border-bottom: 1px solid #dee2e6; }
-    .badge-section { flex: 0 0 300px; text-align: center; }
-    .badge-img { width: 280px; height: 280px; object-fit: cover; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
-    .validation { background: linear-gradient(135deg, #1B4F72, #2E86C1); color: white; padding: 40px; border-radius: 25px; margin: 60px 0; text-align: center; }
-    .code { font-size: 48px; font-weight: bold; font-family: monospace; letter-spacing: 6px; margin: 20px 0; }
-    .footer { text-align: center; margin-top: 60px; color: #7F8C8D; font-size: 14px; }
+    .details td { padding: 9px; border-bottom: 1px solid #dee2e6; }
+    .badge-section { flex: 0 0 240px; text-align: center; display: flex; align-items: center; justify-content: center; }
+    .badge-img { width: 220px; height: 220px; object-fit: cover; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+    .validation { background: linear-gradient(135deg, #1B4F72, #2E86C1); color: white; padding: 18px 30px; border-radius: 20px; margin: 16px 0 10px 0; text-align: center; }
+    .code { font-size: 36px; font-weight: bold; font-family: monospace; letter-spacing: 6px; margin: 8px 0; }
+    .footer { text-align: center; margin-top: 8px; color: #7F8C8D; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -93,7 +92,7 @@ async function generateCertificate(enrollmentId) {
     <div class="logo">CESAE DIGITAL</div>
     <div class="title">CERTIFICADO DE CONCLUSÃO</div>
   </div>
-  
+
   <div class="content">
     <div class="info">
       <div class="name">${participant.name}</div>
@@ -101,7 +100,7 @@ async function generateCertificate(enrollmentId) {
       <div class="details">
         <table>
           <tr><td><strong>Data:</strong></td><td>${new Date(event.start_date).toLocaleDateString("pt-PT")}</td></tr>
-          <tr><td><strong>Duração:</strong></td><td>${event.duration_hours} horas</td></tr>
+          ${event.duration_hours ? `<tr><td><strong>Duração:</strong></td><td>${event.duration_hours} horas</td></tr>` : ''}
           <tr><td><strong>Email:</strong></td><td>${participant.email}</td></tr>
         </table>
       </div>
@@ -114,7 +113,7 @@ async function generateCertificate(enrollmentId) {
   <div class="validation">
     <h3>CÓDIGO DE VALIDAÇÃO</h3>
     <div class="code">${validationCode}</div>
-    <p>Verify at <strong>badges.cesae.pt/validate/${validationCode}</strong></p>
+    <p>Verificar em <strong>badges.cesae.pt/validate/${validationCode}</strong></p>
   </div>
 
   <div class="footer">
@@ -132,24 +131,31 @@ async function generateCertificate(enrollmentId) {
     await page.setContent(html, { waitUntil: "networkidle0" });
 
     const filename = `cert_${validationCode}.pdf`;
-    const filepath = path.join(CERTIFICATES_DIR, filename);
     const buffer = await page.pdf({
       format: "A4",
       landscape: true,
       printBackground: true,
       preferCSSPageSize: true,
     });
-    fs.writeFileSync(filepath, buffer);
 
-    // 6. Update DB
-    await certificate.update({ pdf_url: `/uploads/certificates/${filename}` });
+    // 6. Upload para R2 ou guardar localmente
+    let pdfUrl;
+    if (isR2Configured()) {
+      pdfUrl = await uploadToR2(buffer, `certificates/${filename}`, "application/pdf");
+    } else {
+      const filepath = path.join(CERTIFICATES_DIR, filename);
+      fs.writeFileSync(filepath, buffer);
+      pdfUrl = `/uploads/certificates/${filename}`;
+    }
+
+    // 7. Update DB
+    await certificate.update({ pdf_url: pdfUrl });
 
     await browser.close();
     return {
       success: true,
       filename,
-      filepath,
-      url: `/uploads/certificates/${filename}`,
+      url: pdfUrl,
       validationCode,
     };
   } catch (error) {

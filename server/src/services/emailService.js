@@ -5,32 +5,36 @@ const nodemailer = require("nodemailer");
 const path = require("path");
 const fs = require("fs");
 
-// Configuração do transporter com as variáveis de ambiente
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.EMAIL_PORT || "465"),
-  secure: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-});
+// Cria um transporter novo por envio para evitar ligações perdidas (ECONNRESET/ESOCKET)
+function createTransporter() {
+  const port = parseInt(process.env.EMAIL_PORT || "587");
+  return nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port,
+    secure: port === 465, // 465 → SSL, 587 → STARTTLS
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
+  });
+}
 
 // Deriva o path local do badge a partir da image_url guardada na BD.
 // Funciona quer a URL seja relativa (/uploads/badges/...) ou absoluta (https://host/uploads/badges/...).
 function getBadgeLocalPath(imageUrl) {
   if (!imageUrl) return null;
   const filename = path.basename(imageUrl);
-  const localPath = path.join(__dirname, "../../../uploads/badges", filename);
+  const localPath = path.join(__dirname, "../../uploads/badges", filename);
   return fs.existsSync(localPath) ? localPath : null;
 }
 
 // Função base de envio — aceita destinatário, assunto, corpo HTML e anexos opcionais
 async function sendEmail({ to, subject, html, attachments = [] }) {
   try {
-    const info = await transporter.sendMail({
+    const info = await createTransporter().sendMail({
       from: `"CESAE Digital" <${process.env.EMAIL_USER}>`,
       to,
       subject,
@@ -146,7 +150,7 @@ function buildCertificateTemplate({
                   <!-- Botão PDF -->
                   ${pdfUrl ? `
                   <div style="text-align: center; margin: 0 0 16px 0;">
-                    <a href="${SERVER_URL}${pdfUrl}"
+                    <a href="${pdfUrl.startsWith('http') ? pdfUrl : `${SERVER_URL}${pdfUrl}`}"
                        style="display: inline-block; background: #1e3a8a; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px;">
                        Descarregar Certificado PDF
                     </a>

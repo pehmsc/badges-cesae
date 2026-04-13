@@ -27,6 +27,7 @@ async function createEvent(req, res) {
       location,
       duration_hours,
       category,
+      template_id,
     } = req.body;
 
     // Validação
@@ -51,6 +52,7 @@ async function createEvent(req, res) {
       location,
       duration_hours,
       category,
+      template_id: template_id || null,
       created_by: req.user.id,
     });
 
@@ -167,6 +169,7 @@ async function updateEvent(req, res) {
       location,
       duration_hours,
       category,
+      template_id,
     } = req.body;
 
     const event = await Event.findByPk(id);
@@ -188,9 +191,9 @@ async function updateEvent(req, res) {
       start_date: start_date || event.start_date,
       end_date: end_date !== undefined ? end_date : event.end_date,
       location: location !== undefined ? location : event.location,
-      duration_hours:
-        duration_hours !== undefined ? duration_hours : event.duration_hours,
+      duration_hours: duration_hours !== undefined ? duration_hours : event.duration_hours,
       category: category !== undefined ? category : event.category,
+      template_id: template_id !== undefined ? (template_id || null) : event.template_id,
     });
 
     return res.status(200).json(event);
@@ -258,7 +261,10 @@ async function emitEventBadges(req, res) {
       return res.status(400).json({ error: "Sem participantes elegíveis para emissão" });
     }
 
-    const template = await BadgeTemplate.findOne({ where: { is_default: true } });
+    const templateId = req.body?.template_id || event.template_id;
+    const template = templateId
+      ? await BadgeTemplate.findByPk(templateId)
+      : await BadgeTemplate.findOne({ where: { is_default: true } });
     const templateConfig = template?.design_config || {};
 
     let badgeOK = 0;
@@ -290,13 +296,22 @@ async function emitEventBadges(req, res) {
           template: templateConfig,
         });
 
-        // 3. Guardar Badge na BD
-        await Badge.upsert({
-          enrollment_id: enrollment.id,
-          image_url: badgeResult.url,
-          template_id: template?.id || null,
-          issued_at: new Date(),
-        });
+        // 3. Guardar Badge na BD (update se já existe, create se não existe)
+        const existingBadge = await Badge.findOne({ where: { enrollment_id: enrollment.id } });
+        if (existingBadge) {
+          await existingBadge.update({
+            image_url: badgeResult.url,
+            template_id: template?.id || null,
+            issued_at: new Date(),
+          });
+        } else {
+          await Badge.create({
+            enrollment_id: enrollment.id,
+            image_url: badgeResult.url,
+            template_id: template?.id || null,
+            issued_at: new Date(),
+          });
+        }
         badgeOK++;
 
         // 4. Gerar PDF do certificado (badge já existe em disco)

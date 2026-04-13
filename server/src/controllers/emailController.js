@@ -142,4 +142,62 @@ async function sendBulkEmails(req, res) {
   }
 }
 
-module.exports = { sendBulkEmails };
+// POST /api/enrollments/:enrollmentId/resend-email — Reenviar email para um participante
+async function resendEmail(req, res) {
+  try {
+    const { enrollmentId } = req.params;
+
+    const enrollment = await Enrollment.findByPk(enrollmentId, {
+      include: [
+        { model: Participant, as: "participant" },
+        { model: Badge, as: "badge" },
+      ],
+    });
+
+    if (!enrollment) {
+      return res.status(404).json({ error: "Inscrição não encontrada" });
+    }
+
+    const certificate = await Certificate.findOne({
+      where: { enrollment_id: enrollmentId },
+    });
+
+    if (!certificate) {
+      return res.status(404).json({ error: "Certificado não emitido ainda" });
+    }
+
+    const event = await Event.findByPk(enrollment.event_id);
+
+    // Resetar email_sent para permitir reenvio
+    await certificate.update({ email_sent: false, sent_at: null });
+
+    const log = await EmailLog.create({
+      certificate_id: certificate.id,
+      recipient_email: enrollment.participant.email,
+      status: "pending",
+    });
+
+    const result = await sendCertificateEmail({
+      to: enrollment.participant.email,
+      participantName: enrollment.participant.name,
+      eventTitle: event.title,
+      validationCode: certificate.validation_code,
+      badgeUrl: enrollment.badge ? enrollment.badge.image_url : null,
+      pdfUrl: certificate.pdf_url,
+    });
+
+    if (result.success) {
+      await log.update({ status: "sent", sent_at: new Date() });
+      await certificate.update({ email_sent: true, sent_at: new Date() });
+      return res.status(200).json({ message: "Email reenviado com sucesso" });
+    } else {
+      await log.update({ status: "failed", error_message: result.error });
+      return res.status(500).json({ error: result.error || "Erro ao enviar email" });
+    }
+  } catch (error) {
+    console.error("Erro ao reenviar email:", error);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+}
+
+module.exports = { sendBulkEmails, resendEmail };
